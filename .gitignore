@@ -1,0 +1,22 @@
+# 构建产物
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+
+# 运行数据（不要上传）
+config.json
+.token_cache.json
+
+# 冒烟测试截图
+smoke_page*.png
+
+# ★ 销售资产：激活码清单绝不上传仓库（泄露=密钥池作废）★
+激活码清单*.csv
+激活码清单*.txt
+
+# 图标中间产物（可重新生成）
+assets/app.iconset/
+# macOS
+.DS_Store
