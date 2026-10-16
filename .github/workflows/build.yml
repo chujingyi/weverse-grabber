@@ -31,12 +31,12 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          pyinstaller --name "Weverse抢号助手" --onefile --windowed --noconfirm --clean \
+          pyinstaller --name "Weverse抢号助手" --onedir --windowed --noconfirm --clean \
             --icon assets/app.icns \
             --exclude-module PySide6_WebEngine --exclude-module tkinter app.py
           hdiutil create -volname "Weverse抢号助手" \
             -srcfolder "dist/Weverse抢号助手.app" -ov -format UDZO \
-            "dist/Weverse抢号助手-v0.1-mac.dmg"
+            "dist/Weverse抢号助手-v0.2-mac.dmg"
 
       - name: 打包 (Windows)
         if: runner.os == 'Windows'

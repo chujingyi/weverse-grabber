@@ -3,7 +3,7 @@
 # Weverse 抢号助手 · 打包脚本
 # 用法：bash build.sh
 # 产物：
-#   macOS  → dist/Weverse抢号助手.app + dist/Weverse抢号助手-v0.1-mac.dmg
+#   macOS  → dist/Weverse抢号助手.app + dist/Weverse抢号助手-v0.2-mac.dmg
 #   Windows→ dist/Weverse抢号助手.exe
 # 提示：Windows 的 exe 请在 Windows 机器上跑本脚本，或使用 GitHub Actions（见 .github/workflows/build.yml）
 # ============================================================
@@ -18,14 +18,18 @@ echo "==> 2/4 安装 PyInstaller"
 pip3 install pyinstaller >/dev/null 2>&1 || pip3 install --user pyinstaller
 
 echo "==> 3/4 打包中…"
+# macOS 用 onedir（.app 标准形态，避免 onefile 启动器双 Dock 图标问题）
+# Windows 用 onefile（单 exe 便于分发）
 if [ "$(uname)" = "Darwin" ]; then
   ICON="assets/app.icns"
+  MODE="--onedir"
 else
   ICON="assets/app.ico"
+  MODE="--onefile"
 fi
 pyinstaller \
   --name "Weverse抢号助手" \
-  --onefile \
+  $MODE \
   --windowed \
   --noconfirm \
   --clean \
@@ -40,11 +44,11 @@ if [ "$(uname)" = "Darwin" ]; then
     -volname "Weverse抢号助手" \
     -srcfolder "dist/Weverse抢号助手.app" \
     -ov -format UDZO \
-    "dist/Weverse抢号助手-v0.1-mac.dmg"
+    "dist/Weverse抢号助手-v0.2-mac.dmg"
   echo ""
   echo "✅ 完成："
   echo "   dist/Weverse抢号助手.app"
-  echo "   dist/Weverse抢号助手-v0.1-mac.dmg（发买家用这个）"
+  echo "   dist/Weverse抢号助手-v0.2-mac.dmg（发买家用这个）"
 else
   echo "✅ 完成：dist/Weverse抢号助手.exe"
 fi
