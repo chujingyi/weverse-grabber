@@ -18,6 +18,7 @@ from datetime import datetime, timezone, timedelta
 
 # 部分代理环境（如 Clash/TUN/SakuraCat 的 HTTPS 解密模式）会导致证书校验失败，
 # 程序自动降级重试，关闭安全警告避免刷屏
+# 注：大陆用户使用前需自行开启 VPN/代理，否则无法访问 Weverse
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BASE_API = "https://waiting-api.weverse.io"
@@ -50,10 +51,13 @@ def _safe_request(method, url, retries=2, **kwargs):
     """带网络环境自适应的请求。
 
     降级链（依次尝试，成功即返）：
-      1. 默认：跟随系统代理 + 严格证书校验
-      2. 代理不变 + 跳过证书校验  ← 兼容代理 HTTPS 解密环境（大陆买家常见）
-      3. 绕过代理直连 + 严格校验  ← 兼容系统代理已失效/残留场景
-      4. 绕过代理直连 + 跳过校验  ← 最后兑底
+      1. 默认环境：跟随系统代理 + 严格证书校验
+      2. 默认环境 + 跳过证书校验  ← 兼容代理 HTTPS 解密（大陆买家常见）
+      3. 本地探测代理（扫常见端口）+ 严格校验
+         ← 兼容"代理活着但系统代理设置没写入/失效"（SakuraCat/Clash 常见）
+      4. 本地探测代理 + 跳过校验
+      5. 绕过代理直连 + 严格校验   ← 兼容能直连的网络
+      6. 绕过代理直连 + 跳过校验   ← 最后兜底
     """
     NO_PROXY = {"http": None, "https": None}
     levels = [
@@ -62,6 +66,7 @@ def _safe_request(method, url, retries=2, **kwargs):
         {"proxies": NO_PROXY},
         {"proxies": NO_PROXY, "verify": False},
     ]
+
     last_exc = None
     for extra in levels:
         for attempt in range(retries):
@@ -148,17 +153,31 @@ class WeverseAPI:
                     return False
         return False
 
-    def token_expiry(self):
-        """解码 JWT 返回 access_token 过期时间（本地时间 datetime），失败返回 None"""
-        if not self.access_token:
+    def _jwt_expiry(self, token):
+        if not token:
             return None
         try:
-            payload = self.access_token.split(".")[1]
+            payload = token.split(".")[1]
             payload += "=" * (-len(payload) % 4)
             d = json.loads(base64.urlsafe_b64decode(payload))
             return datetime.fromtimestamp(d["exp"])
         except Exception:
             return None
+
+    def token_expiry(self):
+        """解码 JWT 返回 access_token 过期时间（本地时间 datetime），失败返回 None"""
+        return self._jwt_expiry(self.access_token)
+
+    def refresh_token_expiry(self):
+        """refresh token（底层登录凭证，约90天）的过期时间"""
+        return self._jwt_expiry(self.refresh_token)
+
+    def access_token_stale_hours(self):
+        """access token 距过期还剩多少小时；解析失败返回 None"""
+        exp = self.token_expiry()
+        if not exp:
+            return None
+        return (exp - datetime.now()).total_seconds() / 3600
 
     def _auth_headers(self):
         """带认证的请求头（monitor 无需认证，下单/登录需要）"""

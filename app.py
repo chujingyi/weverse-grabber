@@ -774,8 +774,18 @@ class LoginPage(QtWidgets.QWidget):
     def _mark_ok(self, info):
         email = info.get("maskedEmail", "")
         exp = self.mw.api.token_expiry()
-        exp_s = exp.strftime("%m-%d %H:%M") if exp else "未知"
-        self.lab_status.setText(f"✅ 已登录（{email}）· 登录态自动续期至 {exp_s}")
+        # 展示底层凭证（refresh token，约90天循环）而非短期 access token，
+        # 避免用户误以为3天就要重新登录
+        ref_exp = self.mw.api.refresh_token_expiry()
+        if ref_exp:
+            exp_s = ref_exp.strftime("%Y-%m-%d")
+            auto = "，挂机期间程序自动续期" if (self.mw and self.mw.keepalive_timer and self.mw.keepalive_timer.isActive()) else ""
+            status = f"✅ 已登录（{email}）· 凭证有效期至 {exp_s}{auto}"
+        elif exp:
+            status = f"✅ 已登录（{email}）· 短期票据至 {exp.strftime('%m-%d %H:%M')}，即将自动续期"
+        else:
+            status = f"✅ 已登录（{email}）"
+        self.lab_status.setText(status)
         self.lab_status.setObjectName("OkText")
         self._repolish()
         self.mw.login_valid = True
@@ -1264,6 +1274,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowIcon(icon)
         self._setup_tray(icon)
 
+        # 登录态保活：每小时检查，access token 剩 48h 内则自动续期。
+        # refresh token 有效期约 90 天，程序开着就一直续，挂机不掉线。
+        self.keepalive_timer = QtCore.QTimer(self)
+        self.keepalive_timer.timeout.connect(self._keepalive_tick)
+        self.keepalive_timer.start(3600 * 1000)
+
         # 布局：左侧导航 + 右侧页面
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -1356,6 +1372,25 @@ class MainWindow(QtWidgets.QMainWindow):
     def show_up(self):
         self.showNormal()
         self.raise_()
+
+    def _keepalive_tick(self):
+        """登录态保活：access token 丢失或剩 48h 内时自动续期（静默，失败不打扰）"""
+        if not self.api.refresh_token:
+            return
+        hours = self.api.access_token_stale_hours()
+        need = (hours is None) or (hours < 48)
+        if need:
+            if self.api.refresh_tokens():
+                # 成功续期：若登录页可刷新显示则刷新一下
+                if self.login_valid:
+                    ok, info = self.api.test_login()
+                    if ok:
+                        self.page_login._mark_ok(info)
+                        try:
+                            self.mlog(f"🔄 登录态已自动续期（下次检查约1小时后）")
+                        except Exception:
+                            pass
+            # 失败则等下一小时再试，不打扰用户
 
     def quit_app(self):
         self.stop_monitor(silent=True)
