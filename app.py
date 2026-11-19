@@ -435,11 +435,15 @@ class ActivationPage(QtWidgets.QWidget):
         self.btn_activate = QtWidgets.QPushButton("激 活")
         self.btn_activate.setObjectName("PrimaryBtn")
         self.btn_activate.clicked.connect(self.do_activate)
+        self.btn_change = QtWidgets.QPushButton("更换激活码")
+        self.btn_change.setObjectName("DangerBtn")
+        self.btn_change.clicked.connect(self.do_change)
         self.btn_skip = QtWidgets.QPushButton("跳过，先试用监控功能 →")
         self.btn_skip.clicked.connect(lambda: self.mw.goto(1))
         rowbtn.addWidget(self.btn_activate)
-        rowbtn.addWidget(self.btn_skip)
+        rowbtn.addWidget(self.btn_change)
         rowbtn.addStretch(1)
+        rowbtn.addWidget(self.btn_skip)
         cl.addLayout(rowbtn)
         lay.addWidget(c)
 
@@ -476,6 +480,7 @@ class ActivationPage(QtWidgets.QWidget):
             self.lab_status.setObjectName("OkText")
             self.btn_activate.setEnabled(False)
             self.btn_activate.setText("已激活")
+            self.btn_change.setVisible(True)
         else:
             if self.mw.cfg.get("used_single_keys"):
                 self.lab_status.setText(
@@ -487,8 +492,28 @@ class ActivationPage(QtWidgets.QWidget):
             self.lab_status.setObjectName("WarnText")
             self.btn_activate.setEnabled(True)
             self.btn_activate.setText("激 活")
+            self.btn_change.setVisible(False)
         self.lab_status.style().unpolish(self.lab_status)
         self.lab_status.style().polish(self.lab_status)
+
+    def do_change(self):
+        """更换激活码：清除当前激活状态，便于输入新码（换机/换码/切换类型）"""
+        ret = QtWidgets.QMessageBox.question(
+            self, "更换激活码",
+            "确定要更换激活码吗？\n\n"
+            "· 一次性激活码若已抢成功过，将无法再使用（换新码即可）\n"
+            "· 更换后需要输入新的激活码重新激活",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if ret != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self.mw.cfg["activated"] = False
+        self.mw.cfg["license_key"] = ""
+        save_config(self.mw.cfg)
+        self.ed_key.clear()
+        self.refresh()
+        self.mw.update_nav()
 
     def do_activate(self):
         key = normalize_key(self.ed_key.text())
