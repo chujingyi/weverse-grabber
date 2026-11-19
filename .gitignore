@@ -20,3 +20,4 @@ smoke_page*.png
 assets/app.iconset/
 # macOS
 .DS_Store
+.instance.lock
