@@ -285,16 +285,17 @@ class WeverseAPI:
 
     # ================= 下单 =================
 
-    def reserve(self, venue_id, booth_id, queue_id, group_id, email=None):
+    def reserve(self, venue_id, booth_id, queue_id, group_id, email=None, applicants_count=1):
         """
         预约下单。返回 (成功bool, reservationId或错误消息, 状态码)
+        applicants_count: 预约人数（1~活动上限 maxPersonsByTeam）
         """
         body = {
             "venueId": venue_id,
             "boothId": booth_id,
             "queueId": queue_id,
             "groupId": group_id,
-            "applicantsCount": 1,
+            "applicantsCount": applicants_count,
             "language": "ko",
             "email": email if email else None,
         }

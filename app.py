@@ -302,7 +302,7 @@ class MonitorWorker(QtCore.QThread):
     round_done = QtCore.Signal(int)
 
     def __init__(self, api, venue_id, booth_id, targets, interval,
-                 auto_reserve, stop_on_first, email=""):
+                 auto_reserve, stop_on_first, email="", persons=1):
         super().__init__()
         self.api = api
         self.venue_id = venue_id
@@ -312,6 +312,7 @@ class MonitorWorker(QtCore.QThread):
         self.auto_reserve = auto_reserve
         self.stop_on_first = stop_on_first
         self.email = email
+        self.persons = persons
         self._running = False
 
     def stop(self):
@@ -350,10 +351,11 @@ class MonitorWorker(QtCore.QThread):
             for t in newly:
                 self.found.emit(dict(t))
                 if self.auto_reserve:
-                    self.log.emit(f"发现空位 {t['date']} {t['time']}，正在下单…")
+                    self.log.emit(f"发现空位 {t['date']} {t['time']}，正在下单（{self.persons}人）…")
                     ok, info, code = self.api.reserve(
                         self.venue_id, self.booth_id,
                         t["queue_id"], t["group_id"], self.email or None,
+                        applicants_count=self.persons,
                     )
                     if not ok and code == 401:
                         self.log.emit("登录态过期，自动刷新后重试…")
@@ -361,6 +363,7 @@ class MonitorWorker(QtCore.QThread):
                             ok, info, code = self.api.reserve(
                                 self.venue_id, self.booth_id,
                                 t["queue_id"], t["group_id"], self.email or None,
+                                applicants_count=self.persons,
                             )
                     if ok:
                         self.reserved.emit(dict(t), str(info))
@@ -855,6 +858,18 @@ class TargetPage(QtWidgets.QWidget):
         self.btn_reload = QtWidgets.QPushButton("刷新日期")
         self.btn_reload.clicked.connect(self.load_dates)
         row.addWidget(self.btn_reload)
+        row.addSpacing(28)
+        lbl_persons = QtWidgets.QLabel("预约人数")
+        row.addWidget(lbl_persons)
+        self.spin_persons = QtWidgets.QSpinBox()
+        self.spin_persons.setRange(1, 2)
+        self.spin_persons.setValue(self.mw.cfg.get("persons", 1))
+        self.spin_persons.setMinimumWidth(70)
+        self.spin_persons.setToolTip("每场活动每人可约的最大人数由官方规则决定")
+        row.addWidget(self.spin_persons)
+        self.lab_persons_hint = QtWidgets.QLabel("")
+        self.lab_persons_hint.setObjectName("Hint")
+        row.addWidget(self.lab_persons_hint)
         row.addStretch(1)
         cl.addLayout(row)
 
@@ -873,14 +888,15 @@ class TargetPage(QtWidgets.QWidget):
         lay.addWidget(c)
 
         c2, cl2 = card("监控列表（顺序 = 优先级）")
-        self.table = QtWidgets.QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["优先级", "日期", "时段", "当前状态"])
+        self.table = QtWidgets.QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["优先级", "日期", "时段", "人数", "当前状态"])
         self.table.horizontalHeader().setSectionResizeMode(
-            3, QtWidgets.QHeaderView.ResizeMode.Stretch
+            4, QtWidgets.QHeaderView.ResizeMode.Stretch
         )
         self.table.setColumnWidth(0, 60)
         self.table.setColumnWidth(1, 130)
         self.table.setColumnWidth(2, 90)
+        self.table.setColumnWidth(3, 60)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
@@ -928,6 +944,12 @@ class TargetPage(QtWidgets.QWidget):
             )
             for q in data.get("queues", []):
                 self.cb_date.addItem(q["queuingDate"], q["id"])
+            # 每场活动的最大可约人数（官方规则），同步到人数选择器
+            max_p = data.get("maxPersonsByTeam") or 1
+            self.spin_persons.setRange(1, max(1, int(max_p)))
+            cur = self.mw.cfg.get("persons", 1)
+            self.spin_persons.setValue(min(cur, max_p))
+            self.lab_persons_hint.setText(f"（本场最多可约 {max_p} 人）")
             self.load_slots()
         except Exception as e:
             QtWidgets.QMessageBox.warning(
@@ -965,6 +987,8 @@ class TargetPage(QtWidgets.QWidget):
         if not qid:
             QtWidgets.QMessageBox.warning(self, "提示", "请先选择日期")
             return
+        persons = self.spin_persons.value()
+        self.mw.cfg["persons"] = persons   # 记住本次选择，监控下单时使用
         added = 0
         for cb in self._slot_checks:
             if cb.isChecked():
@@ -977,6 +1001,7 @@ class TargetPage(QtWidgets.QWidget):
                     self.mw.cfg["targets"].append({
                         "date": date, "time": cb.text().split("（")[0],
                         "queue_id": qid, "group_id": gid,
+                        "persons": persons,
                     })
                     added += 1
                 cb.setChecked(False)
@@ -992,9 +1017,12 @@ class TargetPage(QtWidgets.QWidget):
             self.table.setItem(i, 0, QtWidgets.QTableWidgetItem(str(i + 1)))
             self.table.setItem(i, 1, QtWidgets.QTableWidgetItem(t["date"]))
             self.table.setItem(i, 2, QtWidgets.QTableWidgetItem(t["time"]))
+            p_item = QtWidgets.QTableWidgetItem(f"{t.get('persons', 1)}人")
+            p_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(i, 3, p_item)
             item = QtWidgets.QTableWidgetItem("—")
             item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i, 3, item)
+            self.table.setItem(i, 4, item)
 
     def refresh_status(self):
         """手动刷新列表中所有目标的当前状态"""
@@ -1012,7 +1040,7 @@ class TargetPage(QtWidgets.QWidget):
                     g = gmap.get(t["group_id"])
                     row = targets.index(t)
                     ok = bool(g and g.get("reservable"))
-                    item = self.table.item(row, 3)
+                    item = self.table.item(row, 4)
                     item.setText("🟢 可预约" if ok else "🔴 已满")
             except Exception as e:
                 QtWidgets.QMessageBox.warning(self, "提示", f"刷新失败: {e}")
@@ -1488,6 +1516,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.cfg["interval"], auto,
             self.cfg.get("strategy", "stop_first") == "stop_first",
             self.cfg.get("email", ""),
+            int(self.cfg.get("persons", 1) or 1),
         )
         self.worker.log.connect(self.mlog)
         self.worker.states.connect(self.page_monitor.apply_states)
