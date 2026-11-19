@@ -58,14 +58,16 @@ def now_str():
     return datetime.now().strftime("%H:%M:%S")
 
 
-# ---------- 密钥池授权（预生成激活码模式） ----------
+# ---------- 密钥池授权（预生成激活码模式，支持永久版/一次性版） ----------
 
 KEY_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"  # 32字符表，排除易混字符
 
 
-def _key_derive(serial: str) -> str:
-    """由序列号部分推导4位校验码（防伪造/防碰撞）"""
-    h = hmac.new(SECRET.encode(), serial.encode(), hashlib.sha256).hexdigest()
+def _key_derive(serial: str, single: bool = False) -> str:
+    """由序列号推导4位校验码（防伪造/防碰撞）。
+    永久版沿用旧算法（兼容已发出的永久码）；一次性版追加盐值区分类型。"""
+    msg = (serial + "|SINGLE") if single else serial
+    h = hmac.new(SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
     n = int(h[:5], 16)
     return "".join(KEY_ALPHABET[(n >> (5 * i)) & 0x1F] for i in range(4))
 
@@ -74,16 +76,25 @@ def normalize_key(key) -> str:
     return (key or "").strip().upper().replace(" ", "")
 
 
-def valid_key_format(key) -> bool:
-    """验证激活码格式（XXXX-XXXX-XXXX-XXXX，末块为校验码）"""
+def check_key(key) -> tuple:
+    """校验激活码，返回 (格式有效?, 是否一次性版)。
+    同一格式 XXXX-XXXX-XXXX-XXXX，末位校验码自动区分类型。"""
     k = normalize_key(key)
     parts = k.split("-")
     if len(parts) != 4 or any(len(p) != 4 for p in parts):
-        return False
+        return False, False
     if any(c not in KEY_ALPHABET for c in "".join(parts)):
-        return False
+        return False, False
     serial = "".join(parts[:3])
-    return _key_derive(serial) == parts[3]
+    if _key_derive(serial, single=False) == parts[3]:
+        return True, False   # 永久版
+    if _key_derive(serial, single=True) == parts[3]:
+        return True, True    # 一次性版
+    return False, False
+
+
+def valid_key_format(key) -> bool:
+    return check_key(key)[0]
 
 
 def cloud_activate(key) -> tuple:
@@ -131,6 +142,8 @@ CONFIG_PATH = os.path.join(data_dir(), "config.json")
 DEFAULT_CONFIG = {
     "activated": False,
     "license_key": "",
+    "license_type": "perm",        # perm=永久版 | single=一次性版
+    "used_single_keys": [],         # 已消耗的一次性激活码（黑名单，防重复激活）
     "disclaimer_accepted": False,
     "venue_id": None,
     "booth_id": None,
@@ -433,8 +446,10 @@ class ActivationPage(QtWidgets.QWidget):
         tip, tl = card("说明")
         tl.addWidget(QtWidgets.QLabel(
             "· 未激活：可监控余量、弹窗提醒（发现空位你手动去抢）\n"
-            "· 已激活：发现空位自动下单，7×24 挂机不掉线\n"
-            "· 每个激活码仅限一台设备，请勿外传共享"
+            "· 永久版激活码：解锁自动下单，长期有效，后续活动通用\n"
+            "· 一次性激活码：解锁自动下单，挂机不限时长；\n"
+            "  抢成功一次后失效，如需再抢请联系卖家购买新码\n"
+            "· 激活码类型由程序自动识别，粘贴后无需选择"
         ))
         lay.addWidget(tip)
         lay.addStretch(1)
@@ -454,12 +469,21 @@ class ActivationPage(QtWidgets.QWidget):
 
     def refresh(self):
         if self.mw.cfg["activated"]:
-            self.lab_status.setText("✅ 已激活（自动下单已解锁）")
+            if self.mw.cfg.get("license_type") == "single":
+                self.lab_status.setText("✅ 已激活（一次性版 · 未使用，抢成功一次后失效）")
+            else:
+                self.lab_status.setText("✅ 已激活（永久版 · 自动下单已解锁）")
             self.lab_status.setObjectName("OkText")
             self.btn_activate.setEnabled(False)
             self.btn_activate.setText("已激活")
         else:
-            self.lab_status.setText("⭕ 未激活 — 当前为试用模式（仅监控提醒）")
+            if self.mw.cfg.get("used_single_keys"):
+                self.lab_status.setText(
+                    "⭕ 未激活 — 上个一次性激活码已用完（抢成功过一次），\n"
+                    "  如需继续自动下单请联系卖家获取新激活码"
+                )
+            else:
+                self.lab_status.setText("⭕ 未激活 — 当前为试用模式（仅监控提醒）")
             self.lab_status.setObjectName("WarnText")
             self.btn_activate.setEnabled(True)
             self.btn_activate.setText("激 活")
@@ -471,20 +495,32 @@ class ActivationPage(QtWidgets.QWidget):
         if not key:
             QtWidgets.QMessageBox.warning(self, "提示", "请输入激活码")
             return
-        if not valid_key_format(key):
+        valid, is_single = check_key(key)
+        if not valid:
             QtWidgets.QMessageBox.warning(
                 self, "激活失败",
                 "激活码无效，请检查是否复制完整\n（格式：XXXX-XXXX-XXXX-XXXX）",
+            )
+            return
+        if is_single and key in self.mw.cfg.get("used_single_keys", []):
+            QtWidgets.QMessageBox.warning(
+                self, "激活失败",
+                "该一次性激活码已消耗（抢成功过一次）。\n"
+                "如需继续使用自动下单，请联系卖家获取新激活码。",
             )
             return
         ok, note = cloud_activate(key)
         if ok:
             self.mw.cfg["activated"] = True
             self.mw.cfg["license_key"] = key
+            self.mw.cfg["license_type"] = "single" if is_single else "perm"
             save_config(self.mw.cfg)
             self.refresh()
             self.mw.update_nav()
-            msg = "🎉 已解锁自动下单功能！"
+            if is_single:
+                msg = "🎉 已解锁自动下单！\n\n当前为一次性授权：挂机不限时长，抢成功一次后本激活码自动失效。"
+            else:
+                msg = "🎉 已解锁自动下单！（永久版，长期有效）"
             if note:
                 msg += "\n\n" + note
             QtWidgets.QMessageBox.information(self, "激活成功", msg)
@@ -1125,7 +1161,11 @@ class MonitorPage(QtWidgets.QWidget):
             self.chk_auto.setChecked(False)
             self.chk_auto.setEnabled(False)
         else:
-            self.lab_lic.setText("")
+            if self.mw.cfg.get("license_type") == "single":
+                self.lab_lic.setText("一次性版：抢成功后授权自动用完")
+                self.lab_lic.setObjectName("Hint")
+            else:
+                self.lab_lic.setText("")
             self.chk_auto.setEnabled(True)
             self.chk_auto.setChecked(self.mw.cfg.get("auto_reserve", True))
         self.lab_lic.style().unpolish(self.lab_lic)
@@ -1474,10 +1514,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stop_monitor(silent=True)
         pm = self.page_monitor
         pm.set_big("🎉 抢号成功", msg)
+
+        # 一次性版：抢成功一次后授权用完
+        extra = ""
+        if self.cfg.get("license_type") == "single":
+            self.cfg["activated"] = False
+            if self.cfg.get("license_key"):
+                self.cfg.setdefault("used_single_keys", []).append(self.cfg["license_key"])
+            self.cfg["license_key"] = ""
+            extra = ("\n\nⓘ 本次为一次性授权，已随本次抢成功消耗完毕。\n"
+                     "如之后还需自动下单，请联系卖家获取新激活码。")
+            self.mlog("ⓘ 一次性授权已消耗（抢成功一次），如需继续请联系卖家")
+
         QtWidgets.QMessageBox.information(
             self, "抢号成功",
             f"已预约：{t['date']} {t['time']}\n预约号：{rid}\n\n"
-            f"请前往 Weverse「나의 줄서기 내역(我的记录)」确认预约详情。",
+            f"请前往 Weverse「나의 줄서기 내역(我的记录)」确认预约详情。{extra}",
         )
         # 从目标列表移除已抢到的
         self.cfg["targets"] = [
@@ -1485,6 +1537,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if not (x["queue_id"] == t["queue_id"] and x["group_id"] == t["group_id"])
         ]
         save_config(self.cfg)
+        self.page_activation.refresh()
+        pm.refresh_lic_label()
         self.update_nav()
 
     def on_reserve_failed(self, t, err):

@@ -3,7 +3,7 @@
 # Weverse 抢号助手 · 打包脚本
 # 用法：bash build.sh
 # 产物：
-#   macOS  → dist/Weverse抢号助手.app + dist/Weverse抢号助手-v0.2-mac.dmg
+#   macOS  → dist/Weverse抢号助手.app + dist/Weverse抢号助手-v0.3-mac.dmg
 #   Windows→ dist/Weverse抢号助手.exe
 # 提示：Windows 的 exe 请在 Windows 机器上跑本脚本，或使用 GitHub Actions（见 .github/workflows/build.yml）
 # ============================================================
@@ -44,11 +44,11 @@ if [ "$(uname)" = "Darwin" ]; then
     -volname "Weverse抢号助手" \
     -srcfolder "dist/Weverse抢号助手.app" \
     -ov -format UDZO \
-    "dist/Weverse抢号助手-v0.2-mac.dmg"
+    "dist/Weverse抢号助手-v0.3-mac.dmg"
   echo ""
   echo "✅ 完成："
   echo "   dist/Weverse抢号助手.app"
-  echo "   dist/Weverse抢号助手-v0.2-mac.dmg（发买家用这个）"
+  echo "   dist/Weverse抢号助手-v0.3-mac.dmg（发买家用这个）"
 else
   echo "✅ 完成：dist/Weverse抢号助手.exe"
 fi

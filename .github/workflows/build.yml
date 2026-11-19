@@ -36,7 +36,7 @@ jobs:
             --exclude-module PySide6_WebEngine --exclude-module tkinter app.py
           hdiutil create -volname "Weverse抢号助手" \
             -srcfolder "dist/Weverse抢号助手.app" -ov -format UDZO \
-            "dist/Weverse抢号助手-v0.2-mac.dmg"
+            "dist/Weverse抢号助手-v0.3-mac.dmg"
 
       - name: 打包 (Windows)
         if: runner.os == 'Windows'
