@@ -1281,7 +1281,7 @@ class MainWindow(QtWidgets.QMainWindow):
         brand = QtWidgets.QLabel("Weverse")
         brand.setObjectName("Brand")
         sl.addWidget(brand)
-        brand2 = QtWidgets.QLabel("抢号助手 v0.1")
+        brand2 = QtWidgets.QLabel("抢号助手 v0.3")
         brand2.setObjectName("Brand2")
         sl.addWidget(brand2)
         sl.addSpacing(14)

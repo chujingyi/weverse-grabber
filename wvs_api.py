@@ -13,7 +13,12 @@ import json
 import time
 import base64
 import requests
+import urllib3
 from datetime import datetime, timezone, timedelta
+
+# 部分代理环境（如 Clash/TUN/SakuraCat 的 HTTPS 解密模式）会导致证书校验失败，
+# 程序自动降级重试，关闭安全警告避免刷屏
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BASE_API = "https://waiting-api.weverse.io"
 TOKEN_REFRESH_URL = "https://queues.weverse.io/account-api/v1/token/refresh"
@@ -42,15 +47,32 @@ class ApiError(Exception):
 
 
 def _safe_request(method, url, retries=2, **kwargs):
-    """带重试的请求，处理偶发 SSL/网络错误"""
+    """带网络环境自适应的请求。
+
+    降级链（依次尝试，成功即返）：
+      1. 默认：跟随系统代理 + 严格证书校验
+      2. 代理不变 + 跳过证书校验  ← 兼容代理 HTTPS 解密环境（大陆买家常见）
+      3. 绕过代理直连 + 严格校验  ← 兼容系统代理已失效/残留场景
+      4. 绕过代理直连 + 跳过校验  ← 最后兑底
+    """
+    NO_PROXY = {"http": None, "https": None}
+    levels = [
+        {},
+        {"verify": False},
+        {"proxies": NO_PROXY},
+        {"proxies": NO_PROXY, "verify": False},
+    ]
     last_exc = None
-    for i in range(retries):
-        try:
-            return requests.request(method, url, timeout=10, **kwargs)
-        except Exception as e:
-            last_exc = e
-            if i < retries - 1:
-                time.sleep(0.8)
+    for extra in levels:
+        for attempt in range(retries):
+            try:
+                merged = {**kwargs, **extra}
+                return requests.request(method, url, timeout=10, **merged)
+            except Exception as e:
+                last_exc = e
+                # 当前等级内重试一次（应对偶发抖动），仍失败则降级
+                if attempt < retries - 1:
+                    time.sleep(0.8)
     raise last_exc
 
 
